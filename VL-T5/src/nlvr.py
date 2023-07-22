@@ -99,9 +99,9 @@ class Trainer(TrainerBase):
 
         # Load Checkpoint
         self.start_epoch = None
-        if args.load is not None:
-            ckpt_path = args.load + '.pth'
-            self.load_checkpoint(ckpt_path)
+        # if args.load is not None:
+        #     ckpt_path = args.load + '.pth'
+        #     self.load_checkpoint(ckpt_path)
 
 
         if self.args.from_scratch:
@@ -159,181 +159,6 @@ class Trainer(TrainerBase):
             dist.barrier()
 
         global_step = 0
-        for epoch in range(self.args.epochs):
-            if self.start_epoch is not None:
-                epoch += self.start_epoch
-            self.model.train()
-            if self.args.distributed:
-                self.train_loader.sampler.set_epoch(epoch)
-            if self.verbose:
-                pbar = tqdm(total=len(self.train_loader), ncols=150)
-                nlvr_results = np.zeros(4, dtype=int)
-
-
-            epoch_results = {
-                'loss': 0,
-
-            }
-
-            quesid2ans = {}
-            train_acc = 0.
-            train_acc_steps = int(len(self.train_loader) * 0.05)
-            last_acc_step = 0
-
-
-            for step_i, batch in enumerate(self.train_loader):
-
-                self.optim.zero_grad()
-                if self.args.fp16 and _use_native_amp:
-                    with autocast():
-                        if self.args.distributed:
-                            results = self.model.module.train_step(batch)
-                        else:
-                            results = self.model.train_step(batch)
-                else:
-                    if self.args.distributed:
-                        results = self.model.module.train_step(batch)
-                    else:
-                        results = self.model.train_step(batch)
-
-                loss = results['loss']
-
-                # print(f'GPU{self.args.gpu} after loss')
-
-                if self.args.fp16 and _use_native_amp:
-                    self.scaler.scale(loss).backward()
-                elif self.args.fp16 and _use_apex:
-                    with amp.scale_loss(loss, self.optim) as scaled_loss:
-                        scaled_loss.backward()
-                else:
-                    loss.backward()
-
-                # print(f'GPU{self.args.gpu} after backward')
-
-                loss = loss.detach()
-
-                # Update Parameters
-                if self.args.clip_grad_norm > 0:
-                    if self.args.fp16 and _use_native_amp:
-                        self.scaler.unscale_(self.optim)
-                        torch.nn.utils.clip_grad_norm_(
-                            self.model.parameters(), self.args.clip_grad_norm)
-                    elif self.args.fp16 and _use_apex:
-                        torch.nn.utils.clip_grad_norm_(amp.master_params(
-                            self.optim), self.args.clip_grad_norm)
-                    else:
-                        torch.nn.utils.clip_grad_norm_(
-                            self.model.parameters(), self.args.clip_grad_norm)
-
-                if self.args.fp16 and _use_native_amp:
-                    self.scaler.step(self.optim)
-                    self.scaler.update()
-                else:
-                    self.optim.step()
-
-                if self.lr_scheduler:
-                    self.lr_scheduler.step()
-                # self.model.zero_grad()
-                for param in self.model.parameters():
-                    param.grad = None
-
-                global_step += 1
-
-                for k, v in results.items():
-                    if k in epoch_results:
-                        epoch_results[k] += v.item()
-
-                if self.lr_scheduler:
-                    if version.parse(torch.__version__) >= version.parse("1.4"):
-                        lr = self.lr_scheduler.get_last_lr()[0]
-                    else:
-                        lr = self.lr_scheduler.get_lr()[0]
-                else:
-                    try:
-                        lr = self.optim.get_lr()[0]
-                    except AttributeError:
-                        lr = self.args.lr
-
-                if self.verbose:
-                    loss_meter.update(loss.item())
-                    desc_str = f'Epoch {epoch} | LR {lr:.6f} | '
-                    desc_str += f'Loss {loss_meter.val:4f} |'
-
-                    pred_ans = results['pred_ans_id']
-                    ques_ids = batch['question_ids']
-
-                    for qid, ans in zip(ques_ids, pred_ans):
-                        quesid2ans[qid] = ans
-
-                    label = batch['labels'].cpu().numpy()
-                    predict = results['pred_ans_id']
-                    nlvr_results[0] += sum((label == 1) & (predict == 1))
-                    nlvr_results[1] += sum((label == 1) & (predict == 0))
-                    nlvr_results[2] += sum((label == 0) & (predict == 1))
-                    nlvr_results[3] += sum((label == 0) & (predict == 0))
-                    n_total = sum(nlvr_results)
-
-                    desc_str += f' TP {nlvr_results[0]} ({nlvr_results[0]/n_total*100:.1f}%)'
-                    desc_str += f' FN {nlvr_results[1]} ({nlvr_results[1]/n_total*100:.1f}%)'
-                    desc_str += f' FP {nlvr_results[2]} ({nlvr_results[2]/n_total*100:.1f}%)'
-                    desc_str += f' TN {nlvr_results[3]} ({nlvr_results[3]/n_total*100:.1f}%)'
-
-                    pbar.set_description(desc_str)
-                    pbar.update(1)
-
-                if self.args.distributed:
-                    dist.barrier()
-
-            if self.verbose:
-                pbar.close()
-
-                log_str = ''
-
-                # train_score_dict = self.train_loader.evaluator.evaluate(quesid2ans)
-                # train_acc = train_score_dict['accuracy']  * 100.
-                # train_cons = train_score_dict['consistency'] * 100.
-
-                train_acc = self.train_loader.evaluator.evaluate_train(quesid2ans) * 100.
-
-                train_score = train_acc
-
-                log_str += "\nEpoch %d: Train %0.2f" % (epoch, train_score)
-
-                # Validation
-                valid_score_dict = self.evaluate(self.val_loader)
-                valid_acc = valid_score_dict['accuracy'] * 100.
-                # valid_cons = valid_score_dict['consistency'] * 100.
-
-                valid_score = valid_acc
-
-                if valid_score > best_valid:
-                    best_valid = valid_score
-                    best_epoch = epoch
-                    self.save("BEST")
-
-                log_str += "\nEpoch %d: Valid %0.2f" % (epoch, valid_score)
-                log_str += "\nEpoch %d: Best %0.2f\n" % (best_epoch, best_valid)
-
-                wandb_log_dict = {}
-                # wandb_log_dict['Train/Loss'] = loss_meter.val
-                # wandb_log_dict['Train/score'] = score
-                # wandb_log_dict['Valid/score'] = valid_score
-
-                # for score_name, score in train_score_dict.items():
-                    # wandb_log_dict[f'Train/{score_name}'] = score * 100.
-                wandb_log_dict['Train/accuracy'] = train_acc
-
-                for score_name, score in valid_score_dict.items():
-                    wandb_log_dict[f'Valid/{score_name}'] = score * 100.
-
-                wandb.log(wandb_log_dict, step=epoch)
-
-                print(log_str)
-
-            if self.args.distributed:
-                dist.barrier()
-
-
         if self.verbose:
             self.save("LAST")
 
@@ -350,7 +175,7 @@ class Trainer(TrainerBase):
             wandb_log_dict = {}
             for score_name, score in test_score_dict.items():
                 wandb_log_dict[f'Test/{score_name}'] = score * 100.
-            wandb.log(wandb_log_dict, step=epoch)
+            wandb.log(wandb_log_dict, step=0)
 
             from pprint import pformat
 
@@ -404,23 +229,23 @@ def main_worker(gpu, args):
         torch.cuda.set_device(args.gpu)
         dist.init_process_group(backend='nccl')
 
-    print(f'Building train loader at GPU {gpu}')
-    train_loader = get_loader(
-        args,
-        split=args.train, mode='train', batch_size=args.batch_size,
-        distributed=args.distributed, gpu=args.gpu,
-        workers=args.num_workers,
-        topk=args.train_topk,
-    )
+    print(f'Building train loader at GPU {gpu},{__file__}')
+    # train_loader = get_loader(
+    #     args,
+    #     split=args.train, mode='train', batch_size=args.batch_size,
+    #     distributed=args.distributed, gpu=args.gpu,
+    #     workers=args.num_workers,
+    #     topk=args.train_topk,
+    # )
 
     print(f'Building val loader at GPU {gpu}')
-    val_loader = get_loader(
-        args,
-        split=args.valid, mode='val', batch_size=args.batch_size,
-        distributed=args.distributed, gpu=args.gpu,
-        workers=4,
-        topk=args.valid_topk,
-    )
+    # val_loader = get_loader(
+    #     args,
+    #     split=args.valid, mode='val', batch_size=args.batch_size,
+    #     distributed=args.distributed, gpu=args.gpu,
+    #     workers=4,
+    #     topk=args.valid_topk,
+    # )
     print(f'Building test loader at GPU {gpu}')
     test_loader = get_loader(
         args,
@@ -430,7 +255,7 @@ def main_worker(gpu, args):
         topk=args.valid_topk,
     )
 
-    trainer = Trainer(args, train_loader, val_loader, test_loader, train=True)
+    trainer = Trainer(args, None, None, test_loader, train=False)
     trainer.train()
 
 

@@ -458,7 +458,7 @@ class VLT5(T5ForConditionalGeneration):
                 attentions=encoder_outputs[2] if len(
                     encoder_outputs) > 2 else None,
             )
-
+        print("encoder_outputs:",encoder_outputs[0].shape)
         hidden_states = encoder_outputs[0]
 
         if labels is not None and decoder_input_ids is None and decoder_inputs_embeds is None:

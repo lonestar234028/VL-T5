@@ -2,8 +2,7 @@
 name=VLT5
 
 output=snap/nlvr/$name
-
-PYTHONPATH=$PYTHONPATH:./src \
+export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
 python -m torch.distributed.launch \
     --nproc_per_node=$1 \
     src/nlvr.py \

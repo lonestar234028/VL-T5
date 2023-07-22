@@ -66,18 +66,22 @@ class VLT5NLVR(VLT5):
         device = next(self.parameters()).device
         input_ids = batch['input_ids'].to(device)
         B = len(input_ids)
+        print("input_ids: ", input_ids.shape)
         V_L = batch['vis_feats'].size(2)
+        print("vis_feats:", batch['vis_feats'].shape)
         vis_feats = batch['vis_feats'].to(device).view(B, 2*V_L, 2048)
         vis_pos = batch['boxes'].to(device).view(B, 2*V_L, 4)
 
         img_order_ids = [0] * V_L + [1] * V_L
         img_order_ids = torch.tensor(img_order_ids, dtype=torch.long, device=device)
         img_order_ids = img_order_ids.view(1, 2*V_L).expand(B, -1)
+        # print("img_order_ids:", img_order_ids.shape)
 
         obj_order_ids = torch.arange(V_L, dtype=torch.long, device=device)
         obj_order_ids = obj_order_ids.view(1, 1, V_L).expand(B, 2, -1).contiguous().view(B, 2*V_L)
 
         decoder_input_ids = torch.ones(B, 1, dtype=torch.long, device=device) * self.config.decoder_start_token_id
+        # print("decoder_input_ids:", decoder_input_ids.shape)
 
         output = self(
             input_ids=input_ids,
