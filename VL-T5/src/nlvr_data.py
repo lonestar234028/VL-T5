@@ -153,8 +153,21 @@ class NLVRFineTuneDataset(Dataset):
         # caption = datum['caption']
         sent = datum['sent']
 
+        # print("sent:", sent)
         input_ids = self.tokenizer.encode(f'nlvr: {sent}')
-
+        # sent is a list of string, I want encode each string and do Fusion in Decoder
+        input_ids_ext = []
+        input_ids_ext_length = []
+        max_len = 0
+        for i, s in enumerate(sent):
+            input_ids_ext_inner = self.tokenizer.encode(s)
+            input_ids_ext.append(torch.LongTensor(input_ids_ext_inner))
+            input_ids_ext_length.append(len(input_ids_ext_inner))
+            max_len = max(max_len, len(input_ids_ext_inner))
+        
+        # make input_ids_ext a tensor that first dim is len(sent), and second dim is max_len, and do padding with 0
+    
+        # print("input_ids_ext_length:", input_ids_ext_length)
         question_id = uid
         out_dict['question_id'] = question_id
 
@@ -162,7 +175,8 @@ class NLVRFineTuneDataset(Dataset):
         out_dict['sent'] = sent
         out_dict['input_ids'] = torch.LongTensor(input_ids)
         out_dict['input_length'] = len(input_ids)
-
+        out_dict['input_ids_ext'] = input_ids_ext
+        out_dict['input_ids_ext_length'] = input_ids_ext_length
         if 'label' in datum:
             label = datum['label']
 
@@ -192,13 +206,21 @@ class NLVRFineTuneDataset(Dataset):
         B = len(batch)
         V_L = batch[0]['boxes'].size(1)
         S_W_L = max(entry['input_length'] for entry in batch)
+        S_W_L_L = 0
+        max_size = 0
+        for entry in batch:
+            max_size = max(max_size, len(entry['input_ids_ext']))
+            for x in entry['input_ids_ext']:
+                S_W_L_L = max(S_W_L_L, len(x))
+        print("S_W_L_L:", S_W_L_L)
+        print("max_size:", max_size)
         if 'target_ids' in batch[0]:
             T_W_L = max(entry['target_length'] for entry in batch)
 
         feat_dim = batch[0]['vis_feats'].size(-1)
 
         input_ids = torch.ones(B, S_W_L, dtype=torch.long) * self.tokenizer.pad_token_id
-
+        input_ids_ext_tensor = torch.ones(B, max_size, S_W_L_L, dtype=torch.long) * self.tokenizer.pad_token_id
         boxes = torch.zeros(B, 2, V_L, 4, dtype=torch.float)
         vis_feats = torch.zeros(B, 2, V_L, feat_dim, dtype=torch.float)
 
@@ -215,10 +237,10 @@ class NLVRFineTuneDataset(Dataset):
         sentences = []
         question_ids = []
         answers = []
+        input_ids_ext = []
 
         for i, entry in enumerate(batch):
             input_ids[i, :entry['input_length']] = entry['input_ids']
-
             boxes[i] += entry['boxes']
             vis_feats[i] += entry['vis_feats']
 
@@ -230,6 +252,9 @@ class NLVRFineTuneDataset(Dataset):
                 # targets.append(entry['target'])
 
             sentences.append(entry['sent'])
+            ss = entry['input_ids_ext']
+            for j, s in enumerate(ss):
+                input_ids_ext_tensor[i, j, :len(s)] = s
             question_ids.append(entry['question_id'])
             if 'answer' in entry:
                 answers.append(entry['answer'])
@@ -252,6 +277,7 @@ class NLVRFineTuneDataset(Dataset):
         batch_entry['sent'] = sentences
         batch_entry['question_ids'] = question_ids
         batch_entry['answers'] = answers
+        batch_entry['input_ids_ext'] = input_ids_ext_tensor
 
         if batch[0]['label'] is not None:
             batch_entry['labels'] = labels

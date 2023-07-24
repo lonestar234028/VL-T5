@@ -65,8 +65,15 @@ class VLT5NLVR(VLT5):
     def test_step(self, batch):
         device = next(self.parameters()).device
         input_ids = batch['input_ids'].to(device)
+        print("batch keys: ", batch.keys())
         B = len(input_ids)
         print("input_ids: ", input_ids.shape)
+        print("input_ids_ext: ", len(batch['input_ids_ext']))
+        input_ids_ext = batch['input_ids_ext']
+        print("input_ids_ext: ", input_ids_ext.shape)
+        # for input_ids_ext_inner in input_ids_ext:
+        #     print("input_ids_ext_inner: ", input_ids_ext_inner.shape)
+
         V_L = batch['vis_feats'].size(2)
         print("vis_feats:", batch['vis_feats'].shape)
         vis_feats = batch['vis_feats'].to(device).view(B, 2*V_L, 2048)
@@ -85,6 +92,7 @@ class VLT5NLVR(VLT5):
 
         output = self(
             input_ids=input_ids,
+            input_ids_ext=input_ids_ext,
             vis_inputs=(vis_feats, vis_pos, img_order_ids, obj_order_ids),
             decoder_input_ids=decoder_input_ids,
             return_dict=True

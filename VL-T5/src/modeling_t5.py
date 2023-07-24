@@ -171,6 +171,7 @@ class JointEncoder(T5Stack):
     def forward(
         self,
         input_ids=None,
+        input_ids_ext=None,
         attention_mask=None,
 
         vis_inputs=None,
@@ -188,7 +189,7 @@ class JointEncoder(T5Stack):
         if inputs_embeds is None:
             assert self.embed_tokens is not None, "You have to initialize the model with valid token embeddings"
             inputs_embeds = self.embed_tokens(input_ids)
-
+        print("Joint encoder, input_ids_ext:", input_ids_ext.shape)
         B, L = inputs_embeds.size()[:-1]
 
         vis_feats = vis_inputs[0]
@@ -408,6 +409,7 @@ class VLT5(T5ForConditionalGeneration):
     def forward(
         self,
         input_ids=None,
+        input_ids_ext=None,
         attention_mask=None,
         encoder_outputs=None,
 
@@ -439,6 +441,7 @@ class VLT5(T5ForConditionalGeneration):
 
             encoder_outputs = self.encoder(
                 input_ids=input_ids,
+                input_ids_ext=input_ids_ext,
                 attention_mask=attention_mask,
                 inputs_embeds=inputs_embeds,
 
