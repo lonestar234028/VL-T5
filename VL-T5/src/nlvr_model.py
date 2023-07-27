@@ -69,7 +69,7 @@ class VLT5NLVR(VLT5):
         B = len(input_ids)
         print("input_ids: ", input_ids.shape)
         print("input_ids_ext: ", len(batch['input_ids_ext']))
-        input_ids_ext = batch['input_ids_ext']
+        input_ids_ext = batch['input_ids_ext'].to(device)
         print("input_ids_ext: ", input_ids_ext.shape)
         # for input_ids_ext_inner in input_ids_ext:
         #     print("input_ids_ext_inner: ", input_ids_ext_inner.shape)
