@@ -453,9 +453,11 @@ class VLT5(T5ForConditionalGeneration):
             # get the encoder_outputs_ext from each of the input_ids_ext
             encoder_outputs_ext = []
             # loop the second dim of the input_ids_ext
-            B, MAXSIZE,MAXLEN = 0,0,0
-            for input_ids_ext_inner in torch.unbind(input_ids_ext, dim=1):
-                print("input_ids_ext_inner: ", input_ids_ext_inner.shape)
+            B, SEQ_LEN,D,MAXLEN_TEXT = 0,0,0,0
+            for i,input_ids_ext_inner in enumerate(torch.unbind(input_ids_ext, dim=1)):
+                if i < 1:
+                    print("input_ids_ext_inner: ", input_ids_ext_inner.shape)
+                    MAXLEN_TEXT = input_ids_ext_inner.shape[-1]
                 encoder_outputs_ext_inner = self.encoder(
                     input_ids=input_ids_ext_inner,
                     attention_mask=attention_mask,
@@ -469,7 +471,7 @@ class VLT5(T5ForConditionalGeneration):
                     output_hidden_states=output_hidden_states,
                     return_dict=return_dict,
                 )
-                B, MAXSIZE,MAXLEN =encoder_outputs_ext_inner[0].shape
+                B, SEQ_LEN,D =encoder_outputs_ext_inner[0].shape
                 encoder_outputs_ext.append(encoder_outputs_ext_inner)
             print("encoder_outputs_ext:",len(encoder_outputs_ext))
         elif return_dict and not isinstance(encoder_outputs, BaseModelOutput):
@@ -480,8 +482,10 @@ class VLT5(T5ForConditionalGeneration):
                 attentions=encoder_outputs[2] if len(
                     encoder_outputs) > 2 else None,
             )
-        print("encoder_outputs:",encoder_outputs[0].shape)
-        print("B, MAXSIZE,MAXLEN:",B, MAXSIZE,MAXLEN)
+        
+        V_L = 72
+        print("encoder_outputs, V_L:",encoder_outputs[0].shape, V_L)
+        
         hidden_states = encoder_outputs[0]
 
 
@@ -499,34 +503,42 @@ class VLT5(T5ForConditionalGeneration):
         if len(encoder_outputs_ext) > 0:
             for i, item in enumerate(encoder_outputs_ext):
                 encoder_outputs_ext_mean = mean_pooling(item[0])
-                print("encoder_outputs_ext_mean: ", encoder_outputs_ext_mean.shape)
+                if i < 1:
+                    print("encoder_outputs_ext_mean: ", encoder_outputs_ext_mean.shape)
                 cos = nn.CosineSimilarity(dim=1, eps=1e-6)
                 idx2sim[:, i] = cos(anchor_emb, encoder_outputs_ext_mean)
 
         # newidx2sim = sorted(idx2sim.items(), key = lambda x: x[1], reverse= True)
-        print("idx2sim: ", idx2sim)
+        # print("idx2sim: ", idx2sim)
         #sort and get the index of the idx2sim, which is a tensor of (B, len(encoder_outputs_ext))
         # print("idx2sim: ", idx2sim)
         for i in range(B):
             idx2sim_new[i] = torch.argsort(idx2sim[i], descending=True)[:topk]
-        print("idx2sim_new: ", idx2sim_new)
-        encoder_outputs_ext_new_new = torch.ones(B, topk*MAXSIZE, MAXLEN, dtype=torch.long) * self.tokenizer.pad_token_id
+        # print("idx2sim_new: ", idx2sim_new)
+        encoder_outputs_ext_new_new = torch.ones(B, topk*SEQ_LEN, D, dtype=torch.float, device = hidden_states.device) * self.tokenizer.pad_token_id
+        # input_ids_for_mask_new = torch.ones(B, topk*MAXLEN_TEXT + V_L*2, dtype=torch.float, device = hidden_states.device) * self.tokenizer.pad_token_id
+        input_ids_for_mask_new = torch.ones(B, topk*MAXLEN_TEXT, dtype=torch.float, device = hidden_states.device) * self.tokenizer.pad_token_id
 
         # for loop the encoder_outputs_ext
         encoder_outputs_ext_new = {}
         retrived_idx = []
+        input_ids_for_mask = {}
         if len(encoder_outputs_ext) > 0:
             for i, item in enumerate(encoder_outputs_ext):
                 for j, subitem in enumerate(item[0]):
                     # convert idx2sim_new[j] to list
                     # idx2sim_new[j] = idx2sim_new[j].tolist()
-                    if i < 1:
+                    if i < 1 and j < 1:
                         print("i,j,subitem,idx2sim_new[j],idx2sim_new[j]: ", i, j, subitem.shape,idx2sim_new[j],idx2sim_new[j].tolist(), i in idx2sim_new[j].tolist())
                     if i in idx2sim_new[j].tolist():
                         if j in encoder_outputs_ext_new:
                             encoder_outputs_ext_new[j].append(subitem)
                         else:
                             encoder_outputs_ext_new[j] = [subitem]
+                        if j in input_ids_for_mask:
+                            input_ids_for_mask[j].append(input_ids_ext[j][i])
+                        else:
+                            input_ids_for_mask[j] = [input_ids_ext[j][i]]
                     # if idx2sim_new[j] == i:
                     #     encoder_outputs_ext_new.append(subitem)
         print("encoder_outputs_ext_new: ", len(encoder_outputs_ext_new))
@@ -534,10 +546,13 @@ class VLT5(T5ForConditionalGeneration):
             print("k,v,v: ", k, len(v),v[0].shape)
             break
         for k,v in encoder_outputs_ext_new.items():
-            # concat a list of tensor to one tensor
-            
             encoder_outputs_ext_new_new[k,:,:] = torch.cat(v, dim=0)
+        for k,v in input_ids_for_mask.items():
+            print("input_ids_for_mask, k,v,v: ", k, len(v), v[0].shape)
+            break
         print("encoder_outputs_ext_new_new: ", encoder_outputs_ext_new_new.shape)
+        # print("device: ", hidden_states.device)
+        # print("encoder_outputs_ext_new_new: ", encoder_outputs_ext_new_new.device)
         # print("newidx2sim: ", list(map(lambda x: x[0], newidx2sim)))
         # topk = 2 if len(newidx2sim) > 2 else len(newidx2sim)
         # newidx2sim = newidx2sim[:topk]
@@ -562,19 +577,34 @@ class VLT5(T5ForConditionalGeneration):
             if decoder_inputs_embeds is not None:
                 decoder_inputs_embeds = decoder_inputs_embeds[:, -1:]
 
+        # if attention_mask is None:
+        #     # attention_mask = input_ids.ne(self.config.pad_token_id).to(dtype=hidden_states.dtype, device=hidden_states.device)
+        #     attention_mask = input_ids_for_mask_new.ne(self.tokenizer.pad_token_id).to(dtype=hidden_states.dtype, device=hidden_states.device)
+        # if vis_attention_mask is None:
+        #     B, L = attention_mask.size()
+        #     V_L = encoder_outputs[0].size(1) - L
+        #     vis_attention_mask = attention_mask.new_ones(B, V_L)
+        
         if attention_mask is None:
-            attention_mask = input_ids.ne(self.config.pad_token_id).to(dtype=hidden_states.dtype, device=hidden_states.device)
+            V_L = 72
+            x = torch.ones(V_L, dtype=torch.float, device = hidden_states.device)
+            for k,v in input_ids_for_mask.items():
+                # print("x: ", x.shape)
+                # print(" torch.cat([v[0],x,v[1],x], dim=0)", torch.cat([v[0],x,v[1],x], dim=0).shape)
+                # input_ids_for_mask_new[k,:] = torch.cat([v[0],x,v[1],x], dim=0)
+
+                input_ids_for_mask_new[k,:] = torch.cat([v[0],v[1]], dim=0)
+            print("input_ids_for_mask_new: ", input_ids_for_mask_new.shape)
+            # attention_mask = input_ids.ne(self.config.pad_token_id).to(dtype=hidden_states.dtype, device=hidden_states.device)
+            attention_mask = input_ids_for_mask_new.ne(self.tokenizer.pad_token_id).to(dtype=hidden_states.dtype, device=hidden_states.device)
         if vis_attention_mask is None:
-            B, L = attention_mask.size()
-            V_L = encoder_outputs[0].size(1) - L
-            vis_attention_mask = attention_mask.new_ones(B, V_L)
+            vis_attention_mask = attention_mask.new_ones(B, V_L*2)
         encoder_attention_mask = torch.cat([attention_mask, vis_attention_mask], dim=1)
         print("encoder_attention_mask:",encoder_attention_mask.shape)
         # print("decoder_input_ids:",decoder_input_ids.shape)
         # print("decoder_attention_mask:",decoder_attention_mask.shape)
         # print("decoder_inputs_embeds:",decoder_inputs_embeds.shape)
         print("attention_mask:",attention_mask.shape)
-        print("vis_attention_mask:",vis_attention_mask.shape)
         
         # Decode
         decoder_outputs = self.decoder(
@@ -583,7 +613,8 @@ class VLT5(T5ForConditionalGeneration):
             inputs_embeds=decoder_inputs_embeds,
             past_key_values=past_key_values,
 
-            encoder_hidden_states=hidden_states,
+            # encoder_hidden_states=hidden_states,
+            encoder_hidden_states=encoder_outputs_ext_new_new,
             encoder_attention_mask=encoder_attention_mask,
 
             head_mask=head_mask,
