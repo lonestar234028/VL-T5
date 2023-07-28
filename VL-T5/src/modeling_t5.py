@@ -598,8 +598,15 @@ class VLT5(T5ForConditionalGeneration):
             # attention_mask = input_ids.ne(self.config.pad_token_id).to(dtype=hidden_states.dtype, device=hidden_states.device)
             attention_mask = input_ids_for_mask_new.ne(self.tokenizer.pad_token_id).to(dtype=hidden_states.dtype, device=hidden_states.device)
         if vis_attention_mask is None:
-            vis_attention_mask = attention_mask.new_ones(B, V_L*2)
-        encoder_attention_mask = torch.cat([attention_mask, vis_attention_mask], dim=1)
+            vis_attention_mask = attention_mask.new_ones(B, V_L)
+        print("attention_mask:", attention_mask.size(1), attention_mask.size(1) / 2, (int)(attention_mask.size(1) / 2))
+        x = torch.split(attention_mask, (int)(attention_mask.size(1) / 2), dim=1)
+        # split the attention mask into two chunks
+        print("x:", x[0].shape, x[1].shape)
+        print("vis_attention_mask:", vis_attention_mask.shape)
+        encoder_attention_mask = torch.cat([x[0], vis_attention_mask, x[1], vis_attention_mask], dim=1)
+        # concat first half of the attention mask and the visual attention mask
+
         print("encoder_attention_mask:",encoder_attention_mask.shape)
         # print("decoder_input_ids:",decoder_input_ids.shape)
         # print("decoder_attention_mask:",decoder_attention_mask.shape)
