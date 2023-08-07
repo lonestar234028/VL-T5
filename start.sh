@@ -1,5 +1,5 @@
 # 1
-cd /vc_data/users/taoli1/VL-T5
+cd /vc_data/users/taoli1/VL-T5-Ori
 
 conda create -n vlt5 python=3.7
 
@@ -21,3 +21,5 @@ cd VL-T5
 
 # 3
 bash nlvr_eval.sh 1
+
+bash VQA_VLT5.sh 1

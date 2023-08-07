@@ -19,5 +19,5 @@ python -m torch.distributed.launch \
         --backbone 't5-base' \
         --output $output ${@:2} \
         --load snap/pretrain/VLT5/Epoch30 \
-        --batch_size 30 \
+        --batch_size 1 \
         --max_text_length 40 \
