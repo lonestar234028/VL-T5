@@ -1,5 +1,5 @@
 # 1
-cd /vc_data/users/taoli1/VL-T5-Ori
+cd /vc_data/users/taoli1/VL-T5-OKVQA
 
 conda create -n vlt5 python=3.7
 
